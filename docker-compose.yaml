@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  moderator:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/app
+      - cargo_target:/app/target
+    ports:
+      - "8080:8080"
+volumes:
+  cargo_target:
