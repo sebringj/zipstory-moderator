@@ -1,5 +1,6 @@
 FROM rust:1.84.1
 WORKDIR /app
 RUN apt-get update && apt-get install -y ffmpeg
+RUN apt-get update && apt-get install -y libssl3
 RUN cargo install --locked cargo-watch
 CMD ["cargo", "watch", "-x", "run"]
