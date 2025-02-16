@@ -23,7 +23,7 @@ struct RequestBody {
 #[derive(Serialize, Deserialize, Debug)]
 struct ModerationResult {
     description: String,
-    rating: String, // "G", "PG", "PG-13", "R", or "Inappropriate"
+    rating_classification: String, // "G", "PG", "PG-13", "R", "Inappropriate", "Error", or "Not Usable"
 }
 
 #[derive(Serialize)]
@@ -51,7 +51,7 @@ async fn get_frame_moderation(frame_path: &str) -> Result<ModerationResult, Box<
     let messages = vec![
         json!({
             "role": "system",
-            "content": "You are an image moderator. Analyze the image and return a JSON object with exactly two fields: 'description' (a concise analysis) and 'rating' (one of 'G', 'PG', 'PG-13', 'R', or 'Inappropriate'). Your response must be strictly valid JSON without any additional text."
+            "content": "You are an image moderator. Analyze the image and return a JSON object with exactly two fields: 'description' (a concise analysis) and 'rating_classification' (one of 'G', 'PG', 'PG-13', 'R', 'Inappropriate' or 'Not Useful'). Your response must be strictly valid JSON without any additional text."
         }),
         json!({
             "role": "user",
@@ -105,7 +105,7 @@ async fn get_frame_moderation(frame_path: &str) -> Result<ModerationResult, Box<
     let moderation: ModerationResult = serde_json::from_str(&cleaned)
         .unwrap_or(ModerationResult {
             description: format!("Parsing error in response: {}", cleaned),
-            rating: "Inappropriate".to_string(),
+            rating_classification: "Error".to_string(),
         });
 
     Ok(moderation)
@@ -121,7 +121,7 @@ async fn get_frame_moderation_with_retry(frame_path: &str, retries: u32, delay_m
                 } else {
                     return ModerationResult {
                         description: format!("Error: {} (after {} attempts)", e, attempt + 1),
-                        rating: "Inappropriate".to_string(),
+                        rating_classification: "Error".to_string(),
                     };
                 }
             }
@@ -129,7 +129,7 @@ async fn get_frame_moderation_with_retry(frame_path: &str, retries: u32, delay_m
     }
     ModerationResult {
         description: "Unexpected error".to_string(),
-        rating: "Inappropriate".to_string(),
+        rating_classification: "Error".to_string(),
     }
 }
 
@@ -180,8 +180,29 @@ async fn moderate(req: HttpRequest, body: web::Json<RequestBody>) -> impl Respon
         let _ = stdfs::create_dir_all(&thumbnails_dir);
     }
 
-    let filter = r"fps=1,scale=w='if(gt(iw,ih),300,-2)':h='if(gt(iw,ih),-2,300)'";
-    let output_pattern = format!("{}/frame_%03d.jpg", temp_dir.path().to_string_lossy());
+    let ext = parsed_url
+        .path()
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+
+    
+    let (filter, output_pattern) = if ext == "mp4" {
+        // For video: extract 1 frame per second and scale.
+        (
+            r"fps=1,scale=w='if(gt(iw,ih),300,-2)':h='if(gt(iw,ih),-2,300)'",
+            format!("{}/frame_%03d.jpg", temp_dir.path().to_string_lossy()),
+        )
+    } else if ext == "jpg" || ext == "jpeg" {
+        // For image: just scale.
+        (
+            r"scale=w='if(gt(iw,ih),300,-2)':h='if(gt(iw,ih),-2,300)'",
+            format!("{}/frame_001.jpg", temp_dir.path().to_string_lossy()),
+        )
+    } else {
+        return HttpResponse::BadRequest().body("Unsupported file type. Only mp4 and jpg/jpeg are allowed.");
+    };
 
     let ffmpeg_status = Command::new("ffmpeg")
         .args([
@@ -217,7 +238,7 @@ async fn moderate(req: HttpRequest, body: web::Json<RequestBody>) -> impl Respon
                                 status: "extracted".to_string(),
                                 moderation: ModerationResult {
                                     description: "".to_string(),
-                                    rating: "".to_string(),
+                                    rating_classification: "".to_string(),
                                 },
                             });
                         }
