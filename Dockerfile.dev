@@ -1,4 +1,4 @@
-FROM rust:1.84.1
+FROM rust:1.84.1-bookworm
 WORKDIR /app
 RUN apt-get update && apt-get install -y ffmpeg
 RUN apt-get update && apt-get install -y libssl3
